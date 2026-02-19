@@ -17,7 +17,7 @@ class TrackerAna:
         self,
         csv_path: str | Path,
         baselines_path : str | Path,
-        chunksize: int = 900_000
+        chunksize: int = 50_000
     ):
         self.csv_path = Path(csv_path)
         self.chunksize = chunksize
@@ -39,6 +39,7 @@ class TrackerAna:
         self.hybrids = list(range(0,4))
         self.channels = list(range(0,640))
 
+        self.n_flushed = 0
         self.hit_channels = {}
         self.hits_per_event = {}
         self.station_1_x = []
@@ -321,6 +322,9 @@ class TrackerAna:
 
                 ch = hits[hybrid][trig]['channel']
         """
+        diag_low_ids  = []
+        diag_high_ids = []
+
         for hybrid in hits:
             if not self.hit_channels.get(hybrid):
                 self.hit_channels[hybrid] = []
@@ -344,11 +348,15 @@ class TrackerAna:
                 for trig in hits[hybrid][ch]:
                     for idx in range(0,3):
                         sample_n = trig[f'sigma{idx}']
+                        _sample_id = 3*trig['apv_trigger'] + idx
                         if sample_n>2.0:
                             n_low+=1
+                            if self.n_flushed < 5:
+                                diag_low_ids.append(_sample_id)
                         if sample_n>4.0:
                             n_high+=1
-                            _sample_id = 3*trig['apv_trigger'] + idx
+                            if self.n_flushed < 5:
+                                diag_high_ids.append(_sample_id)
                             if sample_n>max_sample:
                                 max_sample = sample_n
                                 max_id = _sample_id
@@ -358,6 +366,25 @@ class TrackerAna:
                     n_hits_this_event += 1
 
             self.hits_per_event[hybrid].append(n_hits_this_event)
+
+        if self.n_flushed < 5:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+            fig.suptitle(f"Diagnostic: Event {self.n_flushed}")
+            if diag_low_ids:
+                ax1.hist(diag_low_ids, bins=50, color='steelblue', edgecolor='black', linewidth=0.5)
+            ax1.set_title(f"Low hits (>2\u03c3): {len(diag_low_ids)} samples")
+            ax1.set_xlabel("Sample ID")
+            ax1.set_ylabel("Count")
+            if diag_high_ids:
+                ax2.hist(diag_high_ids, bins=50, color='tomato', edgecolor='black', linewidth=0.5)
+            ax2.set_title(f"High hits (>4\u03c3): {len(diag_high_ids)} samples")
+            ax2.set_xlabel("Sample ID")
+            ax2.set_ylabel("Count")
+            fig.tight_layout()
+            fig.savefig(f"diagnostic_event_{self.n_flushed}.png", dpi=150, bbox_inches='tight')
+            plt.close(fig)
+
+        self.n_flushed += 1
                     
 
         beamspot_1 = self.compute_intersection(all_hits,0,1)
@@ -414,7 +441,7 @@ class TrackerAna:
             if self.n_processed_batches>20:
                 break
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4)) 
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
         ax1.hist2d(self.station_1_x, self.station_1_y,bins=60, cmap='viridis')
         ax1.text(-4, -80, f'{self.get_stats("x",self.station_1_x)} \n{self.get_stats("y",self.station_1_y)} ', fontsize=12, color='white')
         ax1.set_title("Station 1 (upstream)")
@@ -425,7 +452,8 @@ class TrackerAna:
         ax2.set_title("Station 2 (downstream)")
         ax2.set_xlabel("X-position [mm]")
         ax2.set_ylabel("Y-position [mm]")
-
+        fig.savefig("beamspot_2d.png", dpi=150, bbox_inches='tight')
+        plt.close(fig)
 
         fig, axes = plt.subplots(2,2, figsize=(10, 4))
         axes[0,0].hist(self.station_1_x,alpha=0.7,bins=80, label='Station 1 (x)', color='blue', edgecolor='black', linewidth=0.5, density=False)
@@ -436,7 +464,8 @@ class TrackerAna:
         axes[1,0].legend()
         axes[1,1].hist(self.station_2_y,alpha=0.7,bins=80, label='Station 2 (y)', color='red', edgecolor='black', linewidth=0.5, density=False)
         axes[1,1].legend()
-         
+        fig.savefig("beamspot_projections.png", dpi=150, bbox_inches='tight')
+        plt.close(fig)
 
         fig, axes = plt.subplots(2,2, figsize=(10, 4))
         axes[0,0].hist(self.hit_channels[0], bins=640,range=(0,640), alpha=0.7, label='Module 1', color='blue', edgecolor='black', linewidth=0.5, density=False)
@@ -447,6 +476,8 @@ class TrackerAna:
         axes[1,0].legend()
         axes[1,1].hist(self.hit_channels[3], bins=640,range=(0,640),alpha=0.2, label='Module 4', color='purple', edgecolor='black', linewidth=0.5, density=False)
         axes[1,1].legend()
+        fig.savefig("strip_occupancy.png", dpi=150, bbox_inches='tight')
+        plt.close(fig)
 
         colors_per_hybrid = ['blue', 'red', 'green', 'purple']
         labels_per_hybrid = ['Module 1 (axial)', 'Module 2 (stereo)', 'Module 3 (stereo)', 'Module 4 (axial)']
@@ -461,6 +492,6 @@ class TrackerAna:
                 ax.set_ylabel("Events")
                 ax.legend()
         fig.tight_layout()
-
-        plt.show()
+        fig.savefig("hits_per_event.png", dpi=150, bbox_inches='tight')
+        plt.close(fig)
 
